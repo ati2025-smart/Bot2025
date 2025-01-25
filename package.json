@@ -1,0 +1,13 @@
+{
+  "name": "ati2025-bot",
+  "version": "1.0.0",
+  "main": "ati2025.js",
+  "scripts": {
+    "start": "node ati2025.js"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "dotenv": "^16.0.0",
+    "web3": "^1.10.0"
+  }
+}
