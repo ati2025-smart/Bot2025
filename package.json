@@ -1,7 +1,7 @@
 {
   "name": "ati2025-bot",
   "version": "1.0.0",
-  "main": "ati2025.js",
+  "main": "index.js",
   "scripts": {
     "start": "node ati2025.js"
   },
