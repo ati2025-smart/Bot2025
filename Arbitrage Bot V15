@@ -1,0 +1,143 @@
+const fetch = require('node-fetch');
+const ethers = require('ethers');
+const WebSocket = require('ws');
+
+// Constants
+const MIN_PROFIT_THRESHOLD = 1.01; // 1% minimum profit
+const GAS_LIMIT = 21000; // Gas limit for transaction
+const GAS_MULTIPLIER = 1.2; // Adjust gas price dynamically
+let tradeSizeUsd = 10; // Default trade size for testing
+const MAX_TRADE_SIZE_USD = 100; // Maximum trade size for live scenarios
+const POLYGONSCAN_API_KEY = "Z3WBP5RCWS9FFZ4Y5S6N5PTY4ZBZBXJEWE";
+const SUBGRAPH_SUSHISWAP = "https://gateway.thegraph.com/api/b9174f2174f6fd6a21410e7ed27aafa9/subgraphs/id/B3Jt84tHJJjanE4W1YijyksTwtm7jqK8KcG5dcoc1ZNF";
+const SUBGRAPH_QUICKSWAP = "https://gateway.thegraph.com/api/b9174f2174f6fd6a21410e7ed27aafa9/subgraphs/id/CCFSaj7uS128wazXMdxdnbGA3YQnND9yBdHjPtvH7Bc7";
+
+// Fetch Gas Prices
+async function getGasPrice() {
+  const response = await fetch(`https://api.polygonscan.com/api?module=gastracker&action=gasoracle&apikey=${POLYGONSCAN_API_KEY}`);
+  const data = await response.json();
+  const gasPrice = ethers.utils.parseUnits(data.result.FastGasPrice, "gwei");
+  return gasPrice.mul(ethers.BigNumber.from(Math.round(GAS_MULTIPLIER * 100))).div(100);
+}
+
+// Fetch Data from Subgraph with Liquidity Filtering
+async function fetchPrices(subgraphUrl) {
+  const query = `{
+    pairs(first: 10) {
+      token0 {
+        symbol
+      }
+      token1 {
+        symbol
+      }
+      reserve0
+      reserve1
+      token0Price
+      token1Price
+    }
+  }`;
+
+  const response = await fetch(subgraphUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query })
+  });
+  const data = await response.json();
+  return data.data.pairs.filter(pair => parseFloat(pair.reserve0) > 1000 && parseFloat(pair.reserve1) > 1000); // Filter by liquidity
+}
+
+// Adjust Trade Size Dynamically
+function adjustTradeSize(marketVolatility) {
+  if (marketVolatility > 1.5) {
+    tradeSizeUsd = Math.min(tradeSizeUsd * 1.2, MAX_TRADE_SIZE_USD); // Increase trade size during high volatility
+  } else if (marketVolatility < 0.5) {
+    tradeSizeUsd = Math.max(tradeSizeUsd * 0.8, 10); // Decrease trade size during low volatility
+  }
+}
+
+// Simulate Trade Profitability
+function simulateTrade(token0, token1, priceSushi, priceQuick, gasCost) {
+  const sushiTokens = tradeSizeUsd / priceSushi;
+  const quickTokens = sushiTokens * priceQuick;
+  const profit = quickTokens - tradeSizeUsd;
+  const profitAfterGas = profit - gasCost;
+
+  return { profitAfterGas, profitable: profitAfterGas > 0 };
+}
+
+// Execute Trades with Retry Logic
+async function executeTrade(contractAddress, token0, token1, amount, gasPrice) {
+  try {
+    // Replace with smart contract interaction logic
+    console.log(`Executing trade: ${token0} -> ${token1} for ${amount} at gas price ${gasPrice}`);
+  } catch (error) {
+    console.error(`Error executing trade: ${error.message}. Retrying...`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await executeTrade(contractAddress, token0, token1, amount, gasPrice); // Retry
+  }
+}
+
+// Main Arbitrage Logic
+async function findAndExecuteArbitrage() {
+  try {
+    const [gasPrice, sushiPrices, quickPrices] = await Promise.all([
+      getGasPrice(),
+      fetchPrices(SUBGRAPH_SUSHISWAP),
+      fetchPrices(SUBGRAPH_QUICKSWAP)
+    ]);
+
+    const gasCost = parseFloat(ethers.utils.formatUnits(gasPrice.mul(GAS_LIMIT), "ether"));
+    const marketVolatility = Math.random() * 2; // Placeholder for actual market volatility calculation
+    adjustTradeSize(marketVolatility);
+
+    const profitableTrades = [];
+
+    sushiPrices.forEach((sushiPair) => {
+      const quickPair = quickPrices.find(q => q.token0.symbol === sushiPair.token0.symbol && q.token1.symbol === sushiPair.token1.symbol);
+
+      if (quickPair) {
+        const sushiPrice = parseFloat(sushiPair.token0Price);
+        const quickPrice = parseFloat(quickPair.token1Price);
+
+        const tradeSimulation = simulateTrade(sushiPair.token0.symbol, sushiPair.token1.symbol, sushiPrice, quickPrice, gasCost);
+
+        if (tradeSimulation.profitable) {
+          profitableTrades.push({
+            token0: sushiPair.token0.symbol,
+            token1: sushiPair.token1.symbol,
+            profitAfterGas: tradeSimulation.profitAfterGas
+          });
+        }
+      }
+    });
+
+    profitableTrades.sort((a, b) => b.profitAfterGas - a.profitAfterGas);
+
+    for (const trade of profitableTrades) {
+      await executeTrade(
+        "<Arbitrage_Contract_Address>",
+        trade.token0,
+        trade.token1,
+        Math.min(tradeSizeUsd, MAX_TRADE_SIZE_USD),
+        gasPrice
+      );
+    }
+
+    console.log("Arbitrage cycle complete.");
+  } catch (error) {
+    console.error("Error in arbitrage logic:", error);
+  }
+}
+
+// Continuous Monitoring with Rate-Limit Protection
+let interval;
+function startArbitrage() {
+  interval = setInterval(findAndExecuteArbitrage, 5000);
+}
+
+function stopArbitrage() {
+  clearInterval(interval);
+  console.log("Arbitrage monitoring stopped.");
+}
+
+startArbitrage();
